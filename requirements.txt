@@ -1,0 +1,5 @@
+requests>=2.31.0
+google-cloud-functions>=1.15.0
+functions-framework>=3.4.0
+python-dotenv>=1.0.0
+google-cloud-secret-manager>=2.16.0
