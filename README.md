@@ -1,103 +1,103 @@
 # Fitbit to Obsidian 自動同期システム
 
-FitbitのアクティビティデータをObsidianのデイリーノートに自動同期するGoogle Cloud Functionsプロジェクトです。
+FitbitのアクティビティデータをObsidianのデイリーノートに自動で同期するGoogle Cloud Functionsプロジェクトです。
 
-## 機能
+## ✨ 主な機能
 
-- 📊 Fitbit APIからアクティビティデータを取得（歩数、距離、消費カロリー、アクティブ時間、睡眠時間）
-- 🔄 アクセストークンの自動リフレッシュ
-- 📝 日本語曜日対応のMarkdown形式でデータを整形
-- 🌐 WebDAV経由でObsidianヴォールトにファイルを保存
-- ⏰ Cloud Schedulerによる4時間ごとの自動実行
+- **自動データ取得**: 歩数、距離、消費カロリー、アクティブ時間、睡眠時間など、Fitbitの主要なアクティビティデータを自動で取得します。
+- **動的トークン管理**: Google Cloud Secret Managerと連携し、Fitbitの認証トークンを動的に管理。トークンの有効期限切れによる手動更新の手間を完全に排除しました。
+- **3日間データ同期**: 実行タイミングを逃してもデータを取りこぼさないよう、常に直近3日分のデータを取得・更新します。
+- **柔軟なMarkdown整形**: 見出しやファイル名の形式を環境変数で自由にカスタマイズできます。
+- **WebDAV連携**: WebDAVプロトコル経由でObsidianのデイリーノートを安全に更新します。
+- **自動スケジュール実行**: Google Cloud Schedulerにより、4時間ごとに自動で同期処理が実行されます。
 
-## セットアップ
+## 🚀 セットアップ手順
 
-### 1. Fitbit Developer アプリケーションの作成
+### 1. 前提条件
 
-1. [Fitbit Developer Console](https://dev.fitbit.com/)にアクセス
-2. 新しいアプリケーションを作成
-3. 以下の情報を取得：
-   - Client ID
-   - Client Secret
-   - Refresh Token（OAuth 2.0フローで取得）
+- Google Cloud Platform (GCP) アカウント
+- `gcloud` CLIがインストール・設定済みであること
+- Python 3.12 環境
 
-### 2. WebDAV設定
+### 2. プロジェクトの準備
 
-Infinicloud WebDAVの認証情報を準備：
-- WebDAV URL
-- ユーザー名
-- パスワード
+1.  このリポジトリをクローンします。
+2.  `.env.example`をコピーして`.env`ファイルを作成します。
 
-### 3. Google Cloud Functionsへのデプロイ
+    ```bash
+    cp .env.example .env
+    ```
 
-#### 環境変数の設定
+### 3. Fitbit アプリケーションの作成
 
-```bash
-# 環境変数を設定
-export FITBIT_CLIENT_ID="your_fitbit_client_id"
-export FITBIT_CLIENT_SECRET="your_fitbit_client_secret"
-export FITBIT_REFRESH_TOKEN="your_fitbit_refresh_token"
-export WEBDAV_URL="https://your-webdav-server.com"
-export WEBDAV_USERNAME="your_webdav_username"
-export WEBDAV_PASSWORD="your_webdav_password"
-```
+1.  [Fitbit Developer Console](https://dev.fitbit.com/)にアクセスし、新しいアプリケーションを作成します。
+2.  `Client ID`と`Client Secret`をメモし、`.env`ファイルに設定します。
 
-#### デプロイコマンド
+### 4. 認証コードの取得と初回セットアップ
 
-```bash
-# Google Cloud CLIでログイン
-gcloud auth login
+1.  以下のURLをブラウザで開き、Fitbitアカウントでログインしてアクセスを許可します。
+    `https://www.fitbit.com/oauth2/authorize?response_type=code&client_id=【あなたのClient ID】&scope=activity+heartrate+profile+sleep+weight&redirect_uri=https%3A%2F%2Flocalhost`
+2.  リダイレクト後のURLから`code`パラメータの値（これが認証コード）をコピーします。
+3.  `.env`ファイルの`FITBIT_AUTH_CODE`に、取得した認証コードを設定します。
 
-# プロジェクトを設定
-gcloud config set project YOUR_PROJECT_ID
+### 5. 環境変数の設定
 
-# 関数をデプロイ
-gcloud functions deploy fitbit-sync \
-    --runtime python312 \
-    --trigger-http \
-    --allow-unauthenticated \
-    --entry-point fitbit_sync_handler \
-    --memory 256MB \
-    --timeout 540s \
-    --set-env-vars FITBIT_CLIENT_ID=$FITBIT_CLIENT_ID,FITBIT_CLIENT_SECRET=$FITBIT_CLIENT_SECRET,FITBIT_REFRESH_TOKEN=$FITBIT_REFRESH_TOKEN,WEBDAV_URL=$WEBDAV_URL,WEBDAV_USERNAME=$WEBDAV_USERNAME,WEBDAV_PASSWORD=$WEBDAV_PASSWORD
-```
+`.env`ファイルに、FitbitとWebDAV（Obsidianの保存先）の情報を設定します。
 
-### 4. Cloud Schedulerの設定
+- `GCP_PROJECT_ID`: あなたのGCPプロジェクトID
+- `FITBIT_CLIENT_ID`: FitbitアプリのClient ID
+- `FITBIT_CLIENT_SECRET`: FitbitアプリのClient Secret
+- `FITBIT_AUTH_CODE`: 上記で取得した初回認証コード
+- `WEBDAV_URL`, `WEBDAV_USERNAME`, `WEBDAV_PASSWORD`: WebDAVの接続情報
+- `WEBDAV_PATH`: Obsidianデイリーノートの保存先パス
+- `FITBIT_HEADING_TEMPLATE`: Fitbitデータの見出し（オプション）
+- `DAILY_NOTE_FILENAME_FORMAT`: デイリーノートのファイル名形式（オプション）
 
-4時間ごとに関数を実行するスケジューラーを作成：
+### 6. デプロイ
+
+以下のスクリプトを実行するだけで、必要なAPIの有効化、権限設定、Cloud FunctionsとCloud Schedulerのデプロイが自動で行われます。
 
 ```bash
-# Cloud Schedulerジョブを作成
-gcloud scheduler jobs create http fitbit-sync-job \
-    --schedule="0 */4 * * *" \
-    --uri="https://REGION-YOUR_PROJECT_ID.cloudfunctions.net/fitbit-sync" \
-    --http-method=POST \
-    --time-zone="Asia/Tokyo" \
-    --description="Fitbitデータを4時間ごとに同期"
+./deploy.sh
 ```
 
-## ファイル構造
+デプロイが完了すると、初回実行時に認証コードを使ってリフレッシュトークンが自動的に取得され、Secret Managerに安全に保存されます。
+
+**【重要】**
+初回セットアップが完了したら、`.env`ファイルから`FITBIT_AUTH_CODE`の行を削除（または値を空に）して、再度`./deploy.sh`を実行してください。これにより、2回目以降は通常の同期処理が実行されます。
+
+## 📁 ファイル構成
 
 ```
 Fibit2Obsidian/
-├── main.py              # メインの同期処理
+├── main.py              # メインの同期処理ロジック
 ├── requirements.txt     # Python依存関係
-├── README.md           # このファイル
-├── deploy.sh           # デプロイスクリプト
-└── test_local.py       # ローカルテスト用スクリプト
+├── deploy.sh            # 自動デプロイスクリプト
+├── .env.example         # 環境変数テンプレート
+├── .gitignore           # Git管理対象外ファイル
+├── README.md            # このファイル
+└── test_local.py        # ローカルテスト用スクリプト（非推奨）
 ```
 
-## 出力形式
+## 📝 出力形式
 
-デイリーノートは以下の形式で作成・更新されます：
+デイリーノートは、デフォルトで以下の形式で作成・更新されます。
 
+**ファイル名:** `📅YYYY-MM-DD(曜日).md`
+
+**内容:**
 ```markdown
-# 2024年08月12日(月)
+# YYYY年MM月DD日(曜日)
 
-## 📊 Fitbitデータ (2024-08-12)
-*更新時刻: 17:30*
+## 📊 Fitbitデータ
+*更新時刻: HH:MM*
 
-🚶‍♂️ **歩数**: 8,542 歩
+🚶‍♂️ **歩数**: 12,345 歩
+🏃 **距離**: 8.50 km
+🔥 **消費カロリー**: 2,500 kcal
+⚡ **高強度アクティブ時間**: 30 分
+😴 **睡眠時間**: 7時間30分
+```
 📏 **距離**: 6.23 km
 🔥 **消費カロリー**: 2,145 kcal
 ⚡ **高強度アクティブ時間**: 32 分
