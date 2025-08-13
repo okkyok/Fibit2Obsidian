@@ -250,38 +250,183 @@ class FitbitToObsidianSync:
         markdown_content = f"\n{self.fitbit_heading_template.format(date=date_str)}\n"
         markdown_content += f"*更新時刻: {datetime.now(JST).strftime('%H:%M')}*\n\n"
         
+        # アクティビティデータテーブル
+        markdown_content += "| **アクティビティ** | データ | 単位 |\n"
+        markdown_content += "| :--- | :--- | :--- |\n"
+        
         # 歩数データ
+        steps = 0
         if fitbit_data.get('steps') and 'activities-steps' in fitbit_data['steps']:
             steps_data = fitbit_data['steps']['activities-steps'][0]
             steps = int(steps_data.get('value', '0'))
-            markdown_content += f"🚶‍♂️ **歩数**: {steps:,} 歩\n"
+        markdown_content += f"| 🚶‍♂️ 歩数 | {steps:,} | 歩 |\n"
         
         # 距離データ
+        distance = 0.0
         if fitbit_data.get('distance') and 'activities-distance' in fitbit_data['distance']:
             distance_data = fitbit_data['distance']['activities-distance'][0]
             distance = float(distance_data.get('value', '0'))
-            markdown_content += f"📏 **距離**: {distance:.2f} km\n"
+        markdown_content += f"| 📏 距離 | {distance:.2f} | km |\n"
         
         # カロリーデータ
+        calories = 0
         if fitbit_data.get('calories') and 'activities-calories' in fitbit_data['calories']:
             calories_data = fitbit_data['calories']['activities-calories'][0]
             calories = int(calories_data.get('value', '0'))
-            markdown_content += f"🔥 **消費カロリー**: {calories:,} kcal\n"
+        markdown_content += f"| 🔥 消費カロリー | {calories:,} | kcal |\n"
         
         # アクティブ時間
+        active_minutes = 0
         if fitbit_data.get('active_minutes') and 'activities-minutesVeryActive' in fitbit_data['active_minutes']:
             active_data = fitbit_data['active_minutes']['activities-minutesVeryActive'][0]
             active_minutes = int(active_data.get('value', '0'))
-            markdown_content += f"⚡ **高強度アクティブ時間**: {active_minutes} 分\n"
+        markdown_content += f"| ⚡ 高強度アクティブ時間 | {active_minutes} | 分 |\n\n"
         
-        # 睡眠データ
+        # 睡眠データテーブル
+        markdown_content += "| **睡眠** | データ | 単位 | **睡眠** | データ | 単位 |\n"
+        markdown_content += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        
+        # 睡眠データを解析
+        deep_sleep = 0
+        light_sleep = 0
+        rem_sleep = 0
+        wake_sleep = 0
+        total_sleep_hours = 0.0
+        total_sleep_hhmm = "00:00"
+        bedtime = ""
+        wake_time = ""
+        time_in_bed_hours = 0.0
+        time_in_bed_hhmm = "00:00"
+        wake_count = 0
+        restless_count = 0
+        
         if fitbit_data.get('sleep') and fitbit_data['sleep'].get('sleep'):
-            sleep_data = fitbit_data['sleep']['sleep'][0] if fitbit_data['sleep']['sleep'] else None
+            # 複数の睡眠ログがある場合、メインスリープを優先的に選択
+            sleep_logs = fitbit_data['sleep']['sleep']
+            sleep_data = None
+            
+            # メインスリープ（isMainSleep: true）を探す
+            for log in sleep_logs:
+                if log.get('isMainSleep', False):
+                    sleep_data = log
+                    break
+            
+            # メインスリープが見つからない場合、最も長い睡眠ログを選択
+            if not sleep_data and sleep_logs:
+                sleep_data = max(sleep_logs, key=lambda x: x.get('minutesAsleep', 0))
+            
             if sleep_data:
+                # デバッグ情報をログ出力
+                logger.info(f"睡眠データ詳細: dateOfSleep={sleep_data.get('dateOfSleep')}, isMainSleep={sleep_data.get('isMainSleep')}, logType={sleep_data.get('logType')}")
+                logger.info(f"睡眠時間: minutesAsleep={sleep_data.get('minutesAsleep')}, timeInBed={sleep_data.get('timeInBed')}")
+                
+                # 睡眠データの詳細構造をログ出力
+                levels = sleep_data.get('levels', {})
+                if levels:
+                    logger.info(f"levels構造: data要素数={len(levels.get('data', []))}, shortData要素数={len(levels.get('shortData', []))}")
+                    
+                    # summaryの詳細
+                    summary = levels.get('summary', {})
+                    if summary:
+                        logger.info(f"levels.summary詳細: {summary}")
+                    
+                    # dataとshortDataの一部をサンプル出力
+                    data_sample = levels.get('data', [])[:5]  # 最初の5要素
+                    short_data_sample = levels.get('shortData', [])[:5]  # 最初の5要素
+                    logger.info(f"data例: {data_sample}")
+                    logger.info(f"shortData例: {short_data_sample}")
+                
+                # 全体のsummaryも確認
+                if fitbit_data.get('sleep') and fitbit_data['sleep'].get('summary'):
+                    global_summary = fitbit_data['sleep']['summary']
+                    logger.info(f"全体summary: {global_summary}")
+                
+                # 基本睡眠時間
                 sleep_minutes = sleep_data.get('minutesAsleep', 0)
-                sleep_hours = sleep_minutes // 60
-                sleep_mins = sleep_minutes % 60
-                markdown_content += f"😴 **睡眠時間**: {sleep_hours}時間{sleep_mins}分\n"
+                total_sleep_hours = sleep_minutes / 60.0
+                total_sleep_hhmm = f"{int(sleep_minutes // 60):02d}:{int(sleep_minutes % 60):02d}"
+                
+                # 就寝時間
+                start_time = sleep_data.get('startTime', '')
+                bedtime = ""
+                wake_time = ""
+                if start_time:
+                    try:
+                        # ISO形式の時間をパース
+                        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                        # 日本時間に変換
+                        start_dt_jst = start_dt.astimezone(JST)
+                        bedtime = start_dt_jst.strftime('%H:%M')
+                        
+                        # 起床時刻を計算（就寝時刻 + 総睡眠時間）
+                        wake_dt = start_dt_jst + timedelta(minutes=sleep_minutes)
+                        wake_time = wake_dt.strftime('%H:%M')
+                    except:
+                        bedtime = "不明"
+                        wake_time = "不明"
+                
+                # ベッドにいた時間
+                time_in_bed = sleep_data.get('timeInBed', 0)
+                time_in_bed_hours = time_in_bed / 60.0
+                time_in_bed_hhmm = f"{int(time_in_bed // 60):02d}:{int(time_in_bed % 60):02d}"
+                
+                # 起床回数
+                wake_count = sleep_data.get('awakeCount', 0)
+                
+                # 寝返り回数（restlessCountまたはrestlessCountとして取得）
+                restless_count = sleep_data.get('restlessCount', 0)
+                
+                # 睡眠ステージデータ
+                levels = sleep_data.get('levels', {})
+                if levels:
+                    summary = levels.get('summary', {})
+                    if summary:
+                        # 深い睡眠
+                        deep_data = summary.get('deep', {})
+                        deep_sleep = deep_data.get('minutes', 0)
+                        
+                        # 浅い睡眠
+                        light_data = summary.get('light', {})
+                        light_sleep = light_data.get('minutes', 0)
+                        
+                        # レム睡眠
+                        rem_data = summary.get('rem', {})
+                        rem_sleep = rem_data.get('minutes', 0)
+                        
+                        # 目覚めた状態
+                        wake_data = summary.get('wake', {})
+                        wake_sleep = wake_data.get('minutes', 0)
+                        
+                        # 睡眠ステージの詳細ログ
+                        logger.info(f"睡眠ステージ(levels.summary): deep={deep_sleep}, light={light_sleep}, rem={rem_sleep}, wake={wake_sleep}")
+                
+                # もしlevels.summaryにデータがない場合、全体のsummary.stagesからも試す
+                if deep_sleep == 0 and light_sleep == 0 and rem_sleep == 0 and wake_sleep == 0:
+                    logger.info("levels.summaryからデータが取得できませんでした。summary.stagesを試します。")
+                    if fitbit_data.get('sleep') and fitbit_data['sleep'].get('summary'):
+                        stages_summary = fitbit_data['sleep']['summary'].get('stages', {})
+                        if stages_summary:
+                            deep_sleep = stages_summary.get('deep', 0)
+                            light_sleep = stages_summary.get('light', 0)
+                            rem_sleep = stages_summary.get('rem', 0)
+                            wake_sleep = stages_summary.get('wake', 0)
+                            logger.info(f"睡眠ステージ(summary.stages): deep={deep_sleep}, light={light_sleep}, rem={rem_sleep}, wake={wake_sleep}")
+                        else:
+                            logger.warning("summary.stagesも利用できませんでした。")
+                    else:
+                        logger.warning("sleep.summaryが存在しません。")
+        
+        # 睡眠ステージテーブルの行を作成（修正版）
+        wake_sleep_hhmm = f"{int(wake_sleep // 60):02d}:{int(wake_sleep % 60):02d}" if wake_sleep > 0 else "00:00"
+        rem_sleep_hhmm = f"{int(rem_sleep // 60):02d}:{int(rem_sleep % 60):02d}" if rem_sleep > 0 else "00:00"
+        light_sleep_hhmm = f"{int(light_sleep // 60):02d}:{int(light_sleep % 60):02d}" if light_sleep > 0 else "00:00"
+        deep_sleep_hhmm = f"{int(deep_sleep // 60):02d}:{int(deep_sleep % 60):02d}" if deep_sleep > 0 else "00:00"
+        
+        markdown_content += f"| 💡 目覚めた状態 | {wake_sleep_hhmm} | hh:mm | 🌃 就寝時刻 | {bedtime if bedtime else '不明'} | hh:mm |\n"
+        markdown_content += f"| 🧠 レム睡眠 | {rem_sleep_hhmm} | hh:mm | 🌅 起床時刻 | {wake_time if wake_time else '不明'} | hh:mm |\n"
+        markdown_content += f"| 😴 浅い睡眠 | {light_sleep_hhmm} | hh:mm | 🛌 ベッドにいた合計時間 | {time_in_bed_hhmm} | hh:mm |\n"
+        markdown_content += f"| 🌌 深い睡眠 | {deep_sleep_hhmm} | hh:mm | 👀 起床回数 | {wake_count} | 回 |\n"
+        markdown_content += f"| 💤 総睡眠時間 | {total_sleep_hhmm} | hh:mm | 🔄 寝返りの回数 | {restless_count} | 回 |\n"
         
         return markdown_content.rstrip() + '\n\n'
     
